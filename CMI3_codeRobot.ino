@@ -33,12 +33,12 @@ const int frequence_echantillonnage_moteur = 20;
 //==============================PREPARATION=DU=PID===============================//
 
 //---------Moteur1---------//
-const float kp_M1 = 1.1; // Coefficient proportionnel (choisis par essais successifs)
+const float kp_M1 = 1.2; // Coefficient proportionnel (choisis par essais successifs)
 const float ki_M1 = 0; // Coefficient intégrateur
 const float kd_M1 = 0; // Coefficient dérivateur
 
 //---------Moteur2---------//
-const float kp_M2 = 1.1; // Coefficient proportionnel (choisis par essais successifs)
+const float kp_M2 = 1.3; // Coefficient proportionnel (choisis par essais successifs)
 const float ki_M2 = 0; // Coefficient intégrateur
 const float kd_M2 = 0; // Coefficient dérivateur
 
@@ -50,17 +50,21 @@ float erreurPrecedenteM2 = 0;
 float somme_erreurM1 = 0;
 float somme_erreurM2 = 0;
 
+//==================================EN=MOUVEMENT=======================================//
+
+bool enMouvement = false;
+
 //================================DONNER=UNE=CONSIGNE==================================//
 
-double target_cm = 20;
+double target_cm = 10;
 double target_deg = 19.2 * target_cm;
 
 //Moteur Droit
-int target_ticks_droit; //plus simple d'asservir en ticks car ce sera toujours un nombre entier //1944
+int target_ticks_droit = target_cm * ticksParTourRoueDroite / circonferenceRoueD; //plus simple d'asservir en ticks car ce sera toujours un nombre entier //1944
 int tick_imp_droit = 1921;
 
 //Moteur Gauche
-int target_ticks_gauche; //plus simple d'asservir en ticks car ce sera toujours un nombre  //1787
+int target_ticks_gauche = target_cm * ticksParTourRoueGauche / cironference_roue_G; //plus simple d'asservir en ticks car ce sera toujours un nombre  //1787
 int tick_imp_gauche = 1882;
 
 //========================PREPARATION=ENCODEUR=MOTEUR=DROIT===========================//
@@ -96,9 +100,14 @@ void asservissementMoteur(){
  time += 20;
  erreurM1 = target_ticks_droit - encoder0PosM1;
  erreurM2 = target_ticks_gauche - encoder0PosM2;
- 
- vitesseMoteurDroit = kp_M1 * erreurM1 + kd_M1 * (erreurM1 - erreurPrecedenteM1) + ki_M1 * (somme_erreurM1);
- vitesseMoteurGauche = kp_M2 * erreurM2 + kd_M2 * (erreurM2 - erreurPrecedenteM2) + ki_M2 * (somme_erreurM2);
+
+  //Partie inutile car ki = 0
+ somme_erreurM1 += erreurM1;
+ somme_erreurM2 += erreurM2;
+
+ //Partie inutile car kd = 0
+ erreurPrecedenteM1 = erreurM1;
+ erreurPrecedenteM2 = erreurM2;
 
  if (vitesseMoteurDroit > 255) vitesseMoteurDroit = 255;
  else if (vitesseMoteurDroit < -255) vitesseMoteurDroit = -255;
@@ -111,6 +120,8 @@ void asservissementMoteur(){
  float distanceR2 = encoder0PosM2 / 1882 * 19.2;
 
  Serial.println(encoder0PosM1);
+ vitesseMoteurDroit = kp_M1 * erreurM1 + kd_M1 * (erreurM1 - erreurPrecedenteM1) + ki_M1 * (somme_erreurM1);
+ vitesseMoteurGauche = kp_M2 * erreurM2 + kd_M2 * (erreurM2 - erreurPrecedenteM2) + ki_M2 * (somme_erreurM2);
 }
 
 //============================FONCTIONS=DoEncoder=(2Moteurs)=====================================//
@@ -166,64 +177,49 @@ void updateTargetTicks() {
 
 //=================================DIRECTIONS========================================//
 
-//Aller vers la gauche
-void tournerGauche(){
-  analogWrite(PWM1, vitesseMoteurDroit);
-  analogWrite(PWM2, vitesseMoteurGauche);
+//Arret progressif du robot
+void arretProgressif() {
+  while (vitesseMoteurDroit > 0 && vitesseMoteurGauche > 0) {
+    vitesseMoteurDroit = vitesseMoteurDroit - 5;
+    vitesseMoteurGauche = vitesseMoteurGauche - 5;
+    analogWrite(PWM1, vitesseMoteurDroit);
+    analogWrite(PWM2, vitesseMoteurGauche);
+    delay(50);
+  }
+  arretStop();
+}
+
+//Arrêt du robot
+void arretStop(){
+  pinMode(IN1AM1, OUTPUT);
+  pinMode(IN1AM2, OUTPUT);
+  pinMode(IN2AM1, OUTPUT);
+  pinMode(IN2AM2, OUTPUT);
+  analogWrite(PWM1, 0);
+  analogWrite(PWM2, 0);
   digitalWrite(IN1AM1, LOW);
-  digitalWrite(IN2AM1, HIGH);
-  digitalWrite(IN1AM2, HIGH);
+  digitalWrite(IN2AM1, LOW);
+  digitalWrite(IN1AM2, LOW);
   digitalWrite(IN2AM2, LOW);
 }
 
-//Aller vers la droite
-void tournerDroite(){
-  analogWrite(PWM1, vitesseMoteurDroit);
-  analogWrite(PWM2, vitesseMoteurGauche);
-  digitalWrite(IN1AM1, HIGH);
-  digitalWrite(IN2AM1, LOW);
-  digitalWrite(IN1AM2, LOW);
-  digitalWrite(IN2AM2, HIGH);
-}
-/*
-void Avancer(int cm) {
-  // Calculez la position cible en ticks pour chaque roue
-  target_ticks_droit = encoder0PosM1 + cm * 1984 / 19.2;
-  target_ticks_gauche = encoder0PosM2 + cm * 1747 / 19.2;
-
-  // Faites avancer le robot jusqu'à ce qu'il atteigne la position cible
-  while (abs(encoder0PosM1 - target_ticks_droit) > 10 || abs(encoder0PosM2 - target_ticks_gauche) > 10) {
-    // Mettez à jour les vitesses des moteurs en utilisant l'asservissement en position
-    asservissementMoteur();
-
-    // Envoyez les commandes aux moteurs
-    analogWrite(PWM1, abs(vitesseMoteurDroit));
-    analogWrite(PWM2, abs(vitesseMoteurGauche));
-    digitalWrite(IN1AM1, vitesseMoteurDroit > 0 ? HIGH : LOW);
-    digitalWrite(IN2AM1, vitesseMoteurDroit > 0 ? LOW : HIGH);
-    digitalWrite(IN1AM2, vitesseMoteurGauche > 0 ? HIGH : LOW);
-    digitalWrite(IN2AM2, vitesseMoteurGauche > 0 ? LOW : HIGH);
-
-    // Attendez un peu avant de mettre à jour les vitesses des moteurs à nouveau
-    delay(10);
-  }
-
-  // Arrêtez les moteurs
-  arretStop();
-}
-*/
-//Aller vers l'avant
-void Avancer(int cm){
+//Aller vers la gauche
+void tournerGauche(int cm){  
   int targetRoueDroite = cm * 1921 / 19.2;
-  int targetRoueGauche = cm * 1882 / 19.2;  
-  while((encoder0PosM1 < targetRoueDroite) && (encoder0PosM2 < targetRoueGauche)){
+  int targetRoueGauche = cm * 1882 / 19.2; 
+  pinMode(IN1AM1, OUTPUT);
+  pinMode(IN1AM2, OUTPUT);
+  pinMode(IN2AM1, OUTPUT);
+  pinMode(IN2AM2, OUTPUT);
+  enMouvement = true;
+
+  while(enMouvement && (encoder0PosM1 < targetRoueDroite) && (encoder0PosM2 < targetRoueGauche)){
 
     asservissementMoteur();
-
     analogWrite(PWM1, abs(vitesseMoteurDroit));
     analogWrite(PWM2, abs(vitesseMoteurGauche));
-    digitalWrite(IN1AM1, HIGH);
-    digitalWrite(IN2AM1, LOW);
+    digitalWrite(IN1AM1, LOW);
+    digitalWrite(IN2AM1, HIGH);
     digitalWrite(IN1AM2, HIGH);
     digitalWrite(IN2AM2, LOW);
 
@@ -236,40 +232,126 @@ void Avancer(int cm){
 
     delay(10);
   }
-  arretStop();
+  delay(10);
+  enMouvement = false;
+  arretProgressif();
 }
 
+//Aller vers la droite
+void tournerDroite(int cm){  
+  int targetRoueDroite = cm * 1921 / 19.2;
+  int targetRoueGauche = cm * 1882 / 19.2; 
+  pinMode(IN1AM1, OUTPUT);
+  pinMode(IN1AM2, OUTPUT);
+  pinMode(IN2AM1, OUTPUT);
+  pinMode(IN2AM2, OUTPUT);
+  enMouvement = true;
+
+  while(enMouvement && (encoder0PosM1 < targetRoueDroite) && (encoder0PosM2 < targetRoueGauche)){
+
+    asservissementMoteur();
+    analogWrite(PWM1, abs(vitesseMoteurDroit));
+    analogWrite(PWM2, abs(vitesseMoteurGauche));
+    digitalWrite(IN1AM1, HIGH);
+    digitalWrite(IN2AM1, LOW);
+    digitalWrite(IN1AM2, LOW);
+    digitalWrite(IN2AM2, HIGH);
+
+    /*
+    Serial.println("encodeur droit : ");
+    Serial.println(encoder0PosM1);
+    Serial.println("encodeur gauche : ");
+    Serial.println(encoder0PosM2);
+    */
+
+    delay(10);
+  }
+  delay(10);
+  enMouvement = false;
+  arretProgressif();
+}
+
+//Aller vers l'avant
+void Avancer(int cm){
+  int targetRoueDroite = cm * 1921 / 19.2;
+  int targetRoueGauche = cm * 1882 / 19.2; 
+  pinMode(IN1AM1, OUTPUT);
+  pinMode(IN1AM2, OUTPUT);
+  pinMode(IN2AM1, OUTPUT);
+  pinMode(IN2AM2, OUTPUT);
+  enMouvement = true;
+
+  while(enMouvement && (encoder0PosM1 < targetRoueDroite) && (encoder0PosM2 < targetRoueGauche)){
+
+    asservissementMoteur();
+    analogWrite(PWM1, vitesseMoteurDroit);
+    analogWrite(PWM2, vitesseMoteurGauche);
+    digitalWrite(IN1AM1, HIGH);
+    digitalWrite(IN2AM1, LOW);
+    digitalWrite(IN1AM2, HIGH);
+    digitalWrite(IN2AM2, LOW);
+
+    /*
+    Serial.println("encodeur droit : ");
+    Serial.println(encoder0PosM1);
+    Serial.println("encodeur gauche : ");
+    Serial.println(encoder0PosM2);
+    */
+    delay(10);
+  }
+  delay(1);
+  enMouvement = false;
+  arretProgressif();
+}
 
 //Aller vers l'arrière
-void Reculer(){
-  analogWrite(PWM1, vitesseMoteurDroit);
-  analogWrite(PWM2, vitesseMoteurGauche);
-  digitalWrite(IN1AM1, LOW);
-  digitalWrite(IN2AM1, HIGH);
-  digitalWrite(IN1AM2, LOW);
-  digitalWrite(IN2AM2, HIGH);
+void Reculer(int cm){
+  int targetRoueDroite = cm * 1921 / 19.2;
+  int targetRoueGauche = cm * 1882 / 19.2;
+  pinMode(IN1AM1, OUTPUT);
+  pinMode(IN1AM2, OUTPUT);
+  pinMode(IN2AM1, OUTPUT);
+  pinMode(IN2AM2, OUTPUT);
+  enMouvement = true;
+
+  while(enMouvement && (encoder0PosM1 < targetRoueDroite) && (encoder0PosM2 < targetRoueGauche)){
+
+    asservissementMoteur();
+    analogWrite(PWM1, vitesseMoteurDroit);
+    analogWrite(PWM2, vitesseMoteurGauche);
+    digitalWrite(IN1AM1, LOW);
+    digitalWrite(IN2AM1, HIGH);
+    digitalWrite(IN1AM2, LOW);
+    digitalWrite(IN2AM2, HIGH);
+
+    /*
+    Serial.println("encodeur droit : ");
+    Serial.println(encoder0PosM1);
+    Serial.println("encodeur gauche : ");
+    Serial.println(encoder0PosM2);
+    */
+    delay(10);
+  }
+  enMouvement = false;
+  arretProgressif();
 }
 
-//Arrêt du robot
-void arretStop(){
-  analogWrite(PWM1, 0);
-  analogWrite(PWM2, 0);
-  digitalWrite(IN1AM1, LOW);
-  digitalWrite(IN2AM1, LOW);
-  digitalWrite(IN1AM2, LOW);
-  digitalWrite(IN2AM2, LOW);
-}
 
 //=============================================FORMES=============================================//
 
 //tracer un Cercle
 void circle(int cm){
   int targetRoueDroite = cm * 1984 / 19.2;
-  int targetRoueGauche = cm * 1747 / 19.2;  
-  while((encoder0PosM1 < targetRoueDroite) && (encoder0PosM2 < targetRoueGauche)){
+  int targetRoueGauche = cm * 1747 / 19.2;
+  pinMode(IN1AM1, OUTPUT);
+  pinMode(IN1AM2, OUTPUT);
+  pinMode(IN2AM1, OUTPUT);
+  pinMode(IN2AM2, OUTPUT);
+  enMouvement = true;
+
+  while(enMouvement && (encoder0PosM1 < targetRoueDroite) && (encoder0PosM2 < targetRoueGauche)){
 
     asservissementMoteur();
-
     analogWrite(PWM1, vitesseMoteurDroit);
     analogWrite(PWM2, vitesseMoteurGauche);
     digitalWrite(IN1AM1, HIGH);
@@ -284,6 +366,8 @@ void circle(int cm){
 
     delay(10);
   }
+  delay(10);
+  enMouvement = false;
   arretStop();
 }
 
@@ -294,14 +378,12 @@ void rectangle(int cm){
   for(int i = 0 ; i < 3 ; i++)
   {
     //tourner de 90°
-    digitalWrite(IN1AM1, HIGH);
-    digitalWrite(IN2AM1, LOW);
-    digitalWrite(IN1AM2, LOW);
-    digitalWrite(IN2AM2, HIGH);
-    delay(750);
+    tournerDroite(cm);
     //avancer en ligne droite
     Avancer(cm);
-  } 
+  }
+  delay(10);
+  arretStop();
 }
 
 //tracer un Triangle
@@ -310,121 +392,103 @@ void triangle(int cm){
   Avancer(cm);  
   //Les 3 angles = 60°
   for(int i = 0 ; i < 2 ; i++){
-    analogWrite(PWM1, abs(vitesseMoteurDroit));
-    analogWrite(PWM2, abs(vitesseMoteurGauche));
-    digitalWrite(IN1AM1, HIGH);
-    digitalWrite(IN2AM1, LOW);
-    digitalWrite(IN1AM2, LOW);
-    digitalWrite(IN2AM2, HIGH);
-    delay(1100);
+    asservissementMoteur();
+    tournerDroite(cm);
     Avancer(cm);
   }
+  delay(10);
+  arretStop();
 }
 
 //tracer un Complexe
 void complexe(int cm){
+  asservissementMoteur();
   circle(cm);
-  //tourner de [...]°;
+  tournerDroite(cm);
   triangle(cm);
+  delay(10);
+  arretStop();  
 }
- 
+
 //=========================================SETUP&LOOP=========================================//
 
 void setup(){
   Serial.begin(9600);//Lancement du Serial (Courbe, mesures, ...), valeur '9600' par défaut.
   bluetooth.begin(9600);//Lancement du module "Bluetooth", la valeur '9600' est par défaut. (précisée par le prof)
-  //====================//
+  
   updateTargetTicks();
-  //====================//
+  
   pinMode(PWM1, OUTPUT); 
   pinMode(PWM2, OUTPUT);
-  //====================//  
+   
   pinMode(IN1AM1, OUTPUT);
   pinMode(IN1AM2, OUTPUT);
   pinMode(IN2AM1, OUTPUT);
   pinMode(IN2AM2, OUTPUT);
-  //====================//
+  
   pinMode(encoderPinM1A, INPUT);
   pinMode(encoderPinM2A, INPUT);
-  //====================//
-  digitalWrite(encoderPinM1A, HIGH); // Resistance interne arduino ON
+  
+  digitalWrite(encoderPinM1A, HIGH);
   digitalWrite(encoderPinM2A, HIGH);
-
   // Interruption de l'encodeur A en sortie 0 (pin 2)
-  attachInterrupt(0, doEncoderM1A, CHANGE);
-  attachInterrupt(1, doEncoderM2A, CHANGE);
-
+  attachInterrupt(digitalPinToInterrupt(2), doEncoderM1A, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(3), doEncoderM2A, CHANGE);
+  
   analogWrite(PWM1, 0);
-  analogWrite(PWM2, 1);
+  analogWrite(PWM2, 0);
   delay(300);
 
-  // Interruption pour calcul du PID et asservissement appelée toutes les 10ms
   timer.setInterval(1000 / frequence_echantillonnage_moteur, asservissementMoteur);
 }
 
 void loop(){
-  
   timer.run();
-  updateTargetTicks();
-  rectangle(target_cm);
+  Avancer(target_cm);
   
-  /*
   receptionChar(C);
   
   if(C == 'a'){
-    timer.run();
     Avancer(target_cm);
   }
 
   if(C == 'r'){
-    timer.run();
-    Reculer();
+    Reculer(target_cm);
   }
 
   if(C == 'g'){
-    timer.run();
-    tournerDroite();
+    tournerDroite(target_cm);
   }
 
   if(C == 'd'){
-    timer.run();
-    tournerGauche();
+    tournerGauche(target_cm);
   }
 
   if(C == 's'){
-    timer.run();
     arretStop();
   }
 
   if(C == 'c'){
-    circle();
-    arretStop();
+    circle(target_cm);
   }
   
   if(C == 'k'){
-    timer.run();
-    rectangle();
-    arretStop();
+    rectangle(target_cm);
   }
 
   if(C == 't'){
-    timer.run();
-    triangle();
-    arretStop();
+    triangle(target_cm);
   }
 
   if(C == 'x'){
-    timer.run();
-    complexe();
-    arretStop();
+    complexe(target_cm);
   }
-  */
 }
 
 //===========================================================================================//
 //Informations-Robot-Traceur
 
 //Diamètre des roues : 6.4 cm soit 64 mm
-//Circonférence : 2*pi*rayon = pi*diamètre ~ 192 mm = 19.2 
+//Circonférence : 2*pi*rayon = pi*diamètre ~ 192 mm = 19.2
 
 //1921 tick par tour (donc 360°) Roue Droite et 1882 pour la roue Gauche
